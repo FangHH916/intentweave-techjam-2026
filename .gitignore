@@ -4,7 +4,12 @@ __pycache__/
 .env
 results.json
 data/catalog.jsonl
+data/catalog.jsonl.gz
+data/public_subset_*.jsonl
 data/releases/
+baseline-local.json
+results-v*.json
+dist/
 # Organizer-only code, private evaluation data, manifests, and build reports.
 organizer/
 secure/

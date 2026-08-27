@@ -1,111 +1,135 @@
-# TechJam Conversational E-Commerce Search Challenge
+# IntentWeave
 
-Build an AI shopping agent that asks useful follow-up questions and recommends the customer's hidden target product within at most 10 turns.
+**An offline conversational shopping agent that compiles evolving intent into a
+new retrieval plan on every turn.**
 
-## What You Receive
+IntentWeave is a submission for TikTok TechJam 2026 Track 4, *Shopping Copilot:
+AI Conversational Search and Recommendations*. It improves the official public
+TechnicalScore from **0.106710** to **0.841544** while using no external API,
+no foundation model, no network access, and no paid tokens.
 
-- A frozen catalog of 50,000 products from the `Clothing_Shoes_and_Jewelry` category of Amazon Reviews 2023.
-- 200 labeled public sessions for local development.
-- A weak BM25 starter agent and deterministic local evaluator.
-- The Agent API contract and scoring rules.
+## Public development results
 
-The organizer keeps 800 additional sessions private for final evaluation.
+| Agent | Hit Rate@10 | MRR | MTTC | Efficiency | TechnicalScore |
+|---|---:|---:|---:|---:|---:|
+| Official weak BM25 | 0.125 | 0.068034 | 9.81 | 0.1190 | 0.106710 |
+| IntentWeave | **0.950** | **0.673812** | **2.780** | **0.8220** | **0.841544** |
 
-## Task
+These are deterministic results on the organizer's 200 labeled public sessions.
+They are development results, not claims about the hidden 800-session set.
+See [results and methodology](docs/RESULTS.md).
 
-For each session, your agent receives an anonymized preference profile and a short customer message. Raw user IDs, review text, timestamps, and purchase history are never disclosed. On every turn the agent may:
+## What is different
 
-- ask a natural clarification question in `message` and identify one requested field in `ask_attribute`;
-- return a ranked list of up to 10 catalog `parent_asin` values;
-- do both in the same response.
+- **Dual-track intent routing:** vague Browsing starts with category recall;
+  Buying immediately activates high-precision constraint routes.
+- **Dynamic context compilation:** the conversation becomes a compact goal plus
+  constraints rather than an ever-growing prompt.
+- **Multi-route hybrid retrieval:** exact phrases, categories,
+  category-plus-constraint queries, a compact concept-vector semantic route,
+  latest-turn evidence, and broad recall are fused with weighted reciprocal-rank
+  fusion.
+- **Local semantic reranking:** field-aware coverage, phrase evidence, price
+  proximity, and a conservative quality prior reorder candidates.
+- **Override-safe state:** abrupt intent changes are detected and latest evidence
+  is emphasized without discarding confirmed catalog constraints.
+- **Constraint-yield clarification:** while the pool is under-specified, the
+  agent asks for the single remaining requirement most likely to reduce it and
+  still recommends on every turn.
 
-The session ends when the target product appears in the scored Top 10 or after turn 10. Sessions cover Buying, Browsing, Intent Override, and Boundary behavior.
+The architecture is described in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Download the Catalog
+## Requirements
 
-Download `catalog.jsonl.gz` from the GitHub Release attached to this repository, then run:
+- Python 3.10 or later
+- Python built with SQLite FTS5 support (included in standard CPython builds)
+- Approximately 200-500 MB free memory, depending on Python/SQLite version
+- No network connection during inference
+
+There are no third-party Python dependencies.
+
+## Setup
+
+Clone this repository, then download the organizer's frozen catalog:
 
 ```bash
-gzip -dk catalog.jsonl.gz
-mv catalog.jsonl data/catalog.jsonl
+curl -L -o data/catalog.jsonl.gz \
+  https://github.com/TechJam2026/techjam-conversational-search/releases/download/participant-kit/catalog.jsonl.gz
 ```
 
-Verify the downloaded file using the published `SHA256SUMS` file.
-
-## Run the Starter
-
-Python 3.10 or later is recommended. The starter uses only the Python standard library.
+Verify the catalog checksum against `data/SHA256SUMS`, then extract it:
 
 ```bash
-python3 -m evaluator.local_evaluator
+gzip -dk data/catalog.jsonl.gz
 ```
 
-Edit `starter/agent.py` to implement your system. Do not edit the evaluator or public labels when reporting your local score.
-The command writes per-session results and aggregate metrics to `results.json`.
+The expected path is `data/catalog.jsonl`. The catalog is intentionally ignored
+by Git and must not be committed.
 
-The included weak BM25 starter scores Hit Rate@10 `0.125`, MRR `0.068034`, and
-MTTC `9.81` on the released public set. See `docs/baseline_results.json`.
+## Reproduce the score
 
-## Agent Interface
+Run the unmodified official evaluator:
 
-```python
-class Agent:
-    def reset(self, session_id: str, user_profile: dict) -> None:
-        ...
-
-    def respond(self, session_id: str, user_message: str, turn: int, top_k: int) -> dict:
-        return {
-            "message": "Do you have a material preference?",
-            "ask_attribute": "material",
-            "recommendations": [
-                {"parent_asin": "B000..."},
-                {"parent_asin": "B001..."}
-            ],
-            "usage": {"prompt_tokens": 120, "completion_tokens": 30}
-        }
+```bash
+python -m evaluator.local_evaluator --output results.json
 ```
 
-`ask_attribute` is one of `category`, `material`, `color`, `size`, `style`, `brand`, `budget`, `feature`, `use_case`, `other`, or `null`. See `docs/agent_api_contract.json`.
+Run all tests:
 
-## Technical Metrics
+```bash
+python -m unittest discover -v
+```
 
-- **Hit Rate@10:** fraction of sessions that find the target within 10 turns.
-- **MRR:** mean reciprocal rank of the target; a miss contributes zero.
-- **MTTC:** mean first-hit turn; a miss is assigned turn 11.
-- **Reported token usage:** prompt and completion tokens returned by the team's model client.
+Trace one complete multi-turn session:
+
+```bash
+python -m scripts.trace_session public_0001
+```
+
+Build the standalone submission bundle:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build_submission.ps1
+```
+
+The generated `submission/` directory contains the entry file, source package,
+requirements, and reproduction instructions.
+
+## Repository layout
 
 ```text
-TechnicalScore = 0.50 × HitRate@10 + 0.30 × MRR + 0.20 × Efficiency
-Efficiency = clip((11 - MTTC) / 10, 0, 1)
+intentweave/                 production agent source
+  agent.py                   official interface and orchestration
+  state.py                   intent and multi-turn memory
+  retrieval.py               lexical + concept-vector retrieval, fusion, reranking
+starter/agent.py             official evaluator entry point
+evaluator/                   organizer evaluator (unmodified)
+data/public_set.jsonl        organizer public sessions (unmodified)
+scripts/trace_session.py     deterministic demo/diagnostic
+scripts/build_submission.ps1 standalone bundle builder
+tests/                       evaluator and agent contract tests
+docs/                        architecture, method, results, demo, Devpost copy
 ```
 
-Only exact `parent_asin` equality produces a hit. Core metrics are also reported by scenario.
+## Reproducibility and catalog integrity
 
-## Model Choice and Cost
+- The catalog is opened read-only by the application and indexed into an
+  in-memory SQLite database.
+- Recommendations contain only `parent_asin` values read from that catalog.
+- No secrets, user IDs, private labels, or external services are used.
+- Token usage is reported as zero because the agent calls no language model.
+- Route weights are fixed constants; inference is deterministic.
 
-Teams may use any legally accessible LLM API or local model. Teams manage their own credentials and must never commit API keys. Model choice, estimated cost, token usage, and latency must be disclosed. Token usage is a feasibility metric, not part of the core technical score. The organizer does not provide or reimburse model API credits; teams are responsible for any costs incurred through optional external services.
+## Limitations
 
-## Files
+Common attributes such as “Imported” or “100% Cotton” may still identify many
+catalog items. A small pinned offline embedding model could improve paraphrase
+handling, but would increase startup cost and submission size. Public labels
+were used for development evaluation, so hidden-set performance may differ.
+See the fuller [method report](docs/METHOD_REPORT.md).
 
-```text
-data/public_set.jsonl             200 labeled development sessions
-docs/competition_specification.md participant rules and evaluation protocol
-docs/agent_api_contract.json      machine-readable Agent contract
-docs/evaluation_config.json       scoring configuration
-docs/baseline_results.json        reproducible weak-starter reference score
-starter/agent.py                  editable weak starter
-evaluator/local_evaluator.py      public-set simulator and scorer
-```
+## Tools and attribution
 
-## Judging and Submission Policy
-
-- Participant submission requirements: `docs/submission_rules.md`
-- Participant release checklist: `docs/participant_release_checklist.md`
-- Organizer-only final judging controls: `organizer/JUDGING_RUNBOOK.md`
-- Organizer private release checklist: `organizer/private_release_checklist.md`
-- Judging day operations SOP: `organizer/JUDGING_DAY_SOP.md`
-
-## Data Source
-
-The catalog and sessions are derived from Amazon Reviews 2023 by McAuley Lab, UCSD. See `DATA_ATTRIBUTION.md` before using or redistributing the data.
-Sessions are sampled deterministically from the official Clothing 5-core leave-last-out split and joined to the frozen catalog.
+Development used Python, SQLite FTS5, VS Code, and OpenAI Codex. No inference API
+is used by the submitted agent. Data attribution and license information are in
+[DATA_ATTRIBUTION.md](DATA_ATTRIBUTION.md).
